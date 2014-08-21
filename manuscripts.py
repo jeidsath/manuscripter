@@ -6,6 +6,7 @@ import re
 import os
 import requests
 import multiprocessing
+import shutil
 
 from PIL import Image
 
@@ -41,10 +42,6 @@ def download(args):
         for pp in pages:
             if pp == '##':
                 continue
-            if os.path.exists(os.path.join('data', args.manuscript,
-                                           'fullimages', pp + '.jpg')):
-                continue
-
             mg = ManuscriptGetter(args.manuscript, pp)
             mg.get_image()
             mg.compose_image()
@@ -61,16 +58,15 @@ class ManuscriptGetter(object):
             self.page = page
             self.mdir = os.path.join('data', self.manuscript)
             self.pdir = os.path.join(self.mdir, self.page)
-            self.subdir = os.path.join(self.pdir, 'subimages')
-            self.fulldir = os.path.join(self.mdir, 'fullimages')
-            try:
-                os.makedirs(self.subdir)
-            except OSError:
-                pass
-            try:
-                os.makedirs(self.fulldir)
-            except OSError:
-                pass
+
+            if os.path.exists(os.path.join(self.mdir, self.page + '.jpg')):
+                self.image_exists = True
+            else:
+                self.image_exists = False
+                try:
+                    os.makedirs(self.pdir)
+                except OSError:
+                    pass
 
     def get_pages(self):
         page_url = 'http://www.bl.uk/manuscripts/Viewer.aspx?ref={manu}'
@@ -111,13 +107,15 @@ class ManuscriptGetter(object):
                                             xx=str(xx),
                                             yy=str(yy))
         shortname = str(xx) + '_' + str(yy) + '.jpg'
-        filename = os.path.join(self.subdir, shortname)
+        filename = os.path.join(self.pdir, shortname)
 
         if os.path.exists(filename):
             return
         urllib.urlretrieve(formatted_url, filename)
 
     def get_image(self):
+        if self.image_exists:
+            return
         xx_size, yy_size = self.get_sizes()
         self.xmax = self.get_num_images(xx_size)
         self.ymax = self.get_num_images(yy_size)
@@ -130,15 +128,17 @@ class ManuscriptGetter(object):
         pool.join()
 
     def compose_image(self):
+        if self.image_exists:
+            return
         print 'Composing image {0} {1}'.format(self.manuscript, self.page)
-        outfile = os.path.join(self.fulldir, self.page + '.jpg')
+        outfile = os.path.join(self.mdir, self.page + '.jpg')
         new_xsize = 257 + (self.xmax - 1) * 258
         new_ysize = 257 + (self.ymax - 1) * 258
         outImage = Image.new('RGB', (new_xsize, new_ysize))
         for xx in range(0, self.xmax):
             for yy in range(0, self.ymax):
                 shortname = str(xx) + '_' + str(yy) + '.jpg'
-                filename = os.path.join(self.subdir, shortname)
+                filename = os.path.join(self.pdir, shortname)
                 sub = Image.open(filename)
                 xoff = 0
                 yoff = 0
@@ -149,6 +149,7 @@ class ManuscriptGetter(object):
                 box = (xoff, yoff, xoff + sub.size[0], yoff + sub.size[1])
                 outImage.paste(sub, box)
         outImage.save(outfile)
+        shutil.rmtree(self.pdir)
 
 if __name__ == '__main__':
     main()
