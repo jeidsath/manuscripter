@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-
 import argparse
 import urllib2
 import urllib
 import re
 import os
 import requests
+import multiprocessing
 
 from PIL import Image
 
@@ -27,7 +27,7 @@ def main():
 
 def showpages(args):
     mg = ManuscriptGetter(args.manuscript)
-    print mg.get_pages()
+    print(mg.get_pages())
 
 
 def download(args):
@@ -39,10 +39,19 @@ def download(args):
         mg = ManuscriptGetter(args.manuscript)
         pages = mg.get_pages()
         for pp in pages:
-            if pp != '##':
-                mg = ManuscriptGetter(args.manuscript, pp)
-                mg.get_image()
-                mg.compose_image()
+            if pp == '##':
+                continue
+            if os.path.exists(os.path.join('data', args.manuscript,
+                                           'fullimages', pp + '.jpg')):
+                continue
+
+            mg = ManuscriptGetter(args.manuscript, pp)
+            mg.get_image()
+            mg.compose_image()
+
+
+def store_subimage(self, xx, yy):
+    ManuscriptGetter.store_subimage(self, xx, yy)
 
 
 class ManuscriptGetter(object):
@@ -87,12 +96,14 @@ class ManuscriptGetter(object):
     def get_sizes(self):
         size_url = ('http://www.bl.uk/manuscripts/Proxy.ashx' +
                     '?view={manu}_{page}.xml')
-        pp = urllib2.urlopen(size_url.format(manu=self.manuscript,
-                                             page=self.page))
+        real_url = size_url.format(manu=self.manuscript, page=self.page)
+        pp = urllib2.urlopen(real_url)
         mm = re.search('Width="(\d+).*Height="(\d+)"', pp.read())
         return int(mm.group(1)), int(mm.group(2))
 
     def store_subimage(self, xx, yy):
+        print("Storing {manuscript} {page} {xx} {yy}".format(
+            manuscript=self.manuscript, page=self.page, xx=xx, yy=yy))
         subimage_url = ('http://www.bl.uk/manuscripts/Proxy.ashx?view=' +
                         '{manu}_{page}_files/13/{xx}_{yy}.jpg')
         formatted_url = subimage_url.format(manu=self.manuscript,
@@ -110,11 +121,16 @@ class ManuscriptGetter(object):
         xx_size, yy_size = self.get_sizes()
         self.xmax = self.get_num_images(xx_size)
         self.ymax = self.get_num_images(yy_size)
+        pool = multiprocessing.Pool(processes=4)
         for xx in range(0, self.xmax):
             for yy in range(0, self.ymax):
-                self.store_subimage(xx, yy)
+                # self.store_subimage(xx, yy)
+                pool.apply_async(store_subimage, [self, xx, yy])
+        pool.close()
+        pool.join()
 
     def compose_image(self):
+        print 'Composing image {0} {1}'.format(self.manuscript, self.page)
         outfile = os.path.join(self.fulldir, self.page + '.jpg')
         new_xsize = 257 + (self.xmax - 1) * 258
         new_ysize = 257 + (self.ymax - 1) * 258
